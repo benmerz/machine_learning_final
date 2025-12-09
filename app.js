@@ -7,6 +7,7 @@ const stepTitleEl = document.getElementById("step-title");
 const equationsEl = document.getElementById("equations");
 const stepExplainerEl = document.getElementById("step-explainer");
 const valuesTableEl = document.getElementById("values-table");
+const variableLegendEl = document.getElementById("variable-legend");
 
 const inputX1 = document.getElementById("input-x1");
 const inputX2 = document.getElementById("input-x2");
@@ -29,17 +30,19 @@ const stepItems = Array.from(document.querySelectorAll(".step-item"));
 let currentStep = 0;
 
 // Architecture and parameters
+// We keep a small configuration object so the same code works
+// for different hidden-layer sizes.
 let architecture = {
-  inputSize: 2,
-  hiddenSize: 2,
-  outputSize: 1,
+  inputCount: 2,
+  hiddenNeuronCount: 2,
+  outputCount: 1,
 };
 
 // Weights and biases are stored in arrays for clarity:
-// - w_ih[j][i]: weight from input i -> hidden neuron j
-// - b_h[j]: bias for hidden neuron j
-// - w_ho[j]: weight from hidden neuron j -> output
-// - b_o: bias for the output neuron
+// - inputToHiddenWeights[hiddenIndex][inputIndex]  (w_ih[j,i])
+// - hiddenBiases[hiddenIndex]                     (b_h[j])
+// - hiddenToOutputWeights[hiddenIndex]            (w_ho[j])
+// - outputBias                                    (b_o)
 let params = {};
 let cache = {}; // forward and backward values for current example
 
@@ -55,23 +58,39 @@ function requestRender() {
   });
 }
 
+function renderVariableLegend() {
+  if (!variableLegendEl) return;
+  variableLegendEl.innerHTML = `
+    <div class="variable-legend-item"><strong>x₁, x₂</strong>: inputs you choose with the sliders.</div>
+    <div class="variable-legend-item"><strong>y</strong>: target output you want the network to match.</div>
+    <div class="variable-legend-item"><strong>ŷ</strong>: network's prediction after the forward pass.</div>
+    <div class="variable-legend-item"><strong>hⱼ</strong>: activation of hidden neuron j (after sigmoid).</div>
+    <div class="variable-legend-item"><strong>w_ih[j,i]</strong>: weight from input i into hidden neuron j.</div>
+    <div class="variable-legend-item"><strong>b_h[j]</strong>: bias added to hidden neuron j before sigmoid.</div>
+    <div class="variable-legend-item"><strong>w_ho[j]</strong>: weight from hidden neuron j into the output.</div>
+    <div class="variable-legend-item"><strong>b_o</strong>: bias added to the output neuron before sigmoid.</div>
+    <div class="variable-legend-item"><strong>L</strong>: loss (error) measuring how far ŷ is from y.</div>
+    <div class="variable-legend-item"><strong>dL/d·</strong>: gradient of the loss with respect to some value.</div>
+  `;
+}
+
 function randomWeight() {
   return (Math.random() * 2 - 1) * 0.8; // in [-0.8, 0.8]
 }
 
 function initParams() {
-  const H = architecture.hiddenSize;
-  const I = architecture.inputSize;
+  const hiddenNeuronCount = architecture.hiddenNeuronCount;
+  const inputCount = architecture.inputCount;
 
-  const w_ih = Array.from({ length: H }, () =>
-    Array.from({ length: I }, () => randomWeight())
+  const inputToHiddenWeights = Array.from({ length: hiddenNeuronCount }, () =>
+    Array.from({ length: inputCount }, () => randomWeight())
   );
-  const b_h = Array.from({ length: H }, () => randomWeight());
+  const hiddenBiases = Array.from({ length: hiddenNeuronCount }, () => randomWeight());
 
-  const w_ho = Array.from({ length: H }, () => randomWeight());
-  const b_o = randomWeight();
+  const hiddenToOutputWeights = Array.from({ length: hiddenNeuronCount }, () => randomWeight());
+  const outputBias = randomWeight();
 
-  params = { w_ih, b_h, w_ho, b_o };
+  params = { inputToHiddenWeights, hiddenBiases, hiddenToOutputWeights, outputBias };
 }
 
 function sigmoid(x) {
@@ -84,98 +103,134 @@ function sigmoidPrime(x) {
 }
 
 function fmt(x, digits = 4) {
-  if (typeof x === "string") return x;
-  if (Number.isFinite(x)) return x.toFixed(digits);
-  return String(x);
+  return Number(x).toFixed(digits);
 }
 
 function computeForward() {
-  const x = [parseFloat(inputX1.value), parseFloat(inputX2.value)];
-  const yTrue = parseFloat(targetY.value);
+  const inputVector = [parseFloat(inputX1.value), parseFloat(inputX2.value)];
+  const targetOutput = parseFloat(targetY.value);
 
-  const H = architecture.hiddenSize;
-  const z_h = new Array(H);
-  const h = new Array(H);
+  const hiddenNeuronCount = architecture.hiddenNeuronCount;
+  const hiddenWeightedSums = new Array(hiddenNeuronCount); // z_h
+  const hiddenActivations = new Array(hiddenNeuronCount);  // h
 
-  for (let j = 0; j < H; j++) {
+  for (let hiddenIndex = 0; hiddenIndex < hiddenNeuronCount; hiddenIndex++) {
     let sum = 0;
-    for (let i = 0; i < architecture.inputSize; i++) {
-      sum += params.w_ih[j][i] * x[i];
+    for (let inputIndex = 0; inputIndex < architecture.inputCount; inputIndex++) {
+      sum += params.inputToHiddenWeights[hiddenIndex][inputIndex] * inputVector[inputIndex];
     }
-    sum += params.b_h[j];
-    z_h[j] = sum;
-    h[j] = sigmoid(sum);
+    sum += params.hiddenBiases[hiddenIndex];
+    hiddenWeightedSums[hiddenIndex] = sum;
+    hiddenActivations[hiddenIndex] = sigmoid(sum);
   }
 
-  let z_o = 0;
-  for (let j = 0; j < H; j++) {
-    z_o += params.w_ho[j] * h[j];
+  let outputWeightedSum = 0; // z_o
+  for (let hiddenIndex = 0; hiddenIndex < hiddenNeuronCount; hiddenIndex++) {
+    outputWeightedSum += params.hiddenToOutputWeights[hiddenIndex] * hiddenActivations[hiddenIndex];
   }
-  z_o += params.b_o;
-  const yPred = sigmoid(z_o);
+  outputWeightedSum += params.outputBias;
+  const predictedOutput = sigmoid(outputWeightedSum);
 
-  const loss = 0.5 * Math.pow(yPred - yTrue, 2); // squared error
+  const loss = 0.5 * Math.pow(predictedOutput - targetOutput, 2); // squared error
 
-  cache = { x, yTrue, z_h, h, z_o, yPred, loss };
+  cache = {
+    inputVector,
+    targetOutput,
+    hiddenWeightedSums,
+    hiddenActivations,
+    outputWeightedSum,
+    predictedOutput,
+    loss,
+  };
 }
 
 function computeBackward() {
-  const { x, yTrue, z_h, h, z_o, yPred } = cache;
-  const H = architecture.hiddenSize;
+  const {
+    inputVector,
+    targetOutput,
+    hiddenWeightedSums,
+    hiddenActivations,
+    outputWeightedSum,
+    predictedOutput,
+  } = cache;
 
-  const dL_dy = yPred - yTrue;
-  const dy_dz_o = sigmoidPrime(z_o);
-  const dL_dz_o = dL_dy * dy_dz_o;
+  const hiddenNeuronCount = architecture.hiddenNeuronCount;
 
-  const dL_dw_ho = new Array(H);
-  const dL_dh = new Array(H);
-  const dh_dz_h = new Array(H);
-  const dL_dz_h = new Array(H);
-  const dL_dw_ih = Array.from({ length: H }, () => new Array(architecture.inputSize));
-  const dL_db_h = new Array(H);
+  const gradLossWrtPrediction = predictedOutput - targetOutput; // dL/dŷ
+  const gradPredictionWrtOutputSum = sigmoidPrime(outputWeightedSum); // dŷ/dz_out
+  const gradLossWrtOutputSum = gradLossWrtPrediction * gradPredictionWrtOutputSum; // dL/dz_out
 
-  for (let j = 0; j < H; j++) {
-    dL_dw_ho[j] = dL_dz_o * h[j];
-    dL_dh[j] = dL_dz_o * params.w_ho[j];
-    dh_dz_h[j] = sigmoidPrime(z_h[j]);
-    dL_dz_h[j] = dL_dh[j] * dh_dz_h[j];
+  const gradLossWrtHiddenToOutputWeights = new Array(hiddenNeuronCount); // dL/dw_ho[j]
+  const gradLossWrtHiddenActivations = new Array(hiddenNeuronCount);     // dL/dh[j]
+  const gradHiddenActivationWrtHiddenSum = new Array(hiddenNeuronCount); // σ'(z_h[j])
+  const gradLossWrtHiddenWeightedSums = new Array(hiddenNeuronCount);    // dL/dz_h[j]
 
-    for (let i = 0; i < architecture.inputSize; i++) {
-      dL_dw_ih[j][i] = dL_dz_h[j] * x[i];
+  const gradLossWrtInputToHiddenWeights = Array.from(
+    { length: hiddenNeuronCount },
+    () => new Array(architecture.inputCount)
+  );
+  const gradLossWrtHiddenBiases = new Array(hiddenNeuronCount);
+
+  for (let hiddenIndex = 0; hiddenIndex < hiddenNeuronCount; hiddenIndex++) {
+    gradLossWrtHiddenToOutputWeights[hiddenIndex] =
+      gradLossWrtOutputSum * hiddenActivations[hiddenIndex];
+
+    gradLossWrtHiddenActivations[hiddenIndex] =
+      gradLossWrtOutputSum * params.hiddenToOutputWeights[hiddenIndex];
+
+    gradHiddenActivationWrtHiddenSum[hiddenIndex] = sigmoidPrime(
+      hiddenWeightedSums[hiddenIndex]
+    );
+
+    gradLossWrtHiddenWeightedSums[hiddenIndex] =
+      gradLossWrtHiddenActivations[hiddenIndex] *
+      gradHiddenActivationWrtHiddenSum[hiddenIndex];
+
+    for (let inputIndex = 0; inputIndex < architecture.inputCount; inputIndex++) {
+      gradLossWrtInputToHiddenWeights[hiddenIndex][inputIndex] =
+        gradLossWrtHiddenWeightedSums[hiddenIndex] * inputVector[inputIndex];
     }
-    dL_db_h[j] = dL_dz_h[j];
+
+    gradLossWrtHiddenBiases[hiddenIndex] = gradLossWrtHiddenWeightedSums[hiddenIndex];
   }
 
-  const dL_db_o = dL_dz_o;
+  const gradLossWrtOutputBias = gradLossWrtOutputSum;
 
   Object.assign(cache, {
-    dL_dy,
-    dy_dz_o,
-    dL_dz_o,
-    dL_dw_ho,
-    dL_db_o,
-    dL_dh,
-    dh_dz_h,
-    dL_dz_h,
-    dL_dw_ih,
-    dL_db_h,
+    gradLossWrtPrediction,
+    gradPredictionWrtOutputSum,
+    gradLossWrtOutputSum,
+    gradLossWrtHiddenToOutputWeights,
+    gradLossWrtOutputBias,
+    gradLossWrtHiddenActivations,
+    gradHiddenActivationWrtHiddenSum,
+    gradLossWrtHiddenWeightedSums,
+    gradLossWrtInputToHiddenWeights,
+    gradLossWrtHiddenBiases,
   });
 }
 
 function applyGradientDescent() {
   const lr = parseFloat(lrSlider.value);
-  const H = architecture.hiddenSize;
+  const hiddenNeuronCount = architecture.hiddenNeuronCount;
 
-  const { dL_dw_ih, dL_db_h, dL_dw_ho, dL_db_o } = cache;
+  const {
+    gradLossWrtInputToHiddenWeights,
+    gradLossWrtHiddenBiases,
+    gradLossWrtHiddenToOutputWeights,
+    gradLossWrtOutputBias,
+  } = cache;
 
-  for (let j = 0; j < H; j++) {
-    for (let i = 0; i < architecture.inputSize; i++) {
-      params.w_ih[j][i] -= lr * dL_dw_ih[j][i];
+  for (let hiddenIndex = 0; hiddenIndex < hiddenNeuronCount; hiddenIndex++) {
+    for (let inputIndex = 0; inputIndex < architecture.inputCount; inputIndex++) {
+      params.inputToHiddenWeights[hiddenIndex][inputIndex] -=
+        lr * gradLossWrtInputToHiddenWeights[hiddenIndex][inputIndex];
     }
-    params.b_h[j] -= lr * dL_db_h[j];
-    params.w_ho[j] -= lr * dL_dw_ho[j];
+    params.hiddenBiases[hiddenIndex] -= lr * gradLossWrtHiddenBiases[hiddenIndex];
+    params.hiddenToOutputWeights[hiddenIndex] -=
+      lr * gradLossWrtHiddenToOutputWeights[hiddenIndex];
   }
-  params.b_o -= lr * dL_db_o;
+  params.outputBias -= lr * gradLossWrtOutputBias;
 }
 
 // SVG drawing
@@ -191,18 +246,18 @@ function updateLayout() {
     { id: "x2", x: 80, y: 220 },
   ];
 
-  const H = architecture.hiddenSize;
+  const hiddenNeuronCount = architecture.hiddenNeuronCount;
   const xHidden = 280;
   const top = 60;
   const bottom = 240;
   const hidden = [];
 
-  if (H === 1) {
+  if (hiddenNeuronCount === 1) {
     hidden.push({ id: "h1", x: xHidden, y: 150 });
   } else {
-    const gap = (bottom - top) / (H - 1);
-    for (let j = 0; j < H; j++) {
-      hidden.push({ id: `h${j + 1}`, x: xHidden, y: top + gap * j });
+    const gap = (bottom - top) / (hiddenNeuronCount - 1);
+    for (let hiddenIndex = 0; hiddenIndex < hiddenNeuronCount; hiddenIndex++) {
+      hidden.push({ id: `h${hiddenIndex + 1}`, x: xHidden, y: top + gap * hiddenIndex });
     }
   }
   layout.hidden = hidden;
@@ -250,10 +305,12 @@ function drawNetwork() {
       <style>
         .conn { stroke: rgba(148, 163, 184, 0.8); stroke-width: 2; }
         .conn-gradient { stroke: #a855f7; stroke-width: 3; }
+        .conn-bias { stroke: #38bdf8; stroke-width: 1.6; stroke-dasharray: 4 3; }
         .neuron { fill: #020617; stroke-width: 2; }
         .neuron-input { stroke: #22c55e; }
         .neuron-hidden { stroke: #eab308; }
         .neuron-output { stroke: #f97316; }
+        .neuron-bias { stroke: #38bdf8; }
         .neuron-highlight { filter: drop-shadow(0 0 4px rgba(129, 140, 248, 0.9)); }
         .neuron-text { fill: #e5e7eb; font-size: 12px; text-anchor: middle; dominant-baseline: middle; }
         .label-text { fill: #9ca3af; font-size: 11px; text-anchor: middle; }
@@ -271,6 +328,18 @@ function drawNetwork() {
     });
   });
 
+  // Bias node for hidden layer (constant 1 going into every hidden neuron)
+  const hiddenBiasX = 210;
+  const hiddenBiasY = 40;
+  const hiddenBiasCircle = createCircle(hiddenBiasX, hiddenBiasY, 10, "neuron neuron-bias");
+  svg.appendChild(hiddenBiasCircle);
+  svg.appendChild(createText(hiddenBiasX, hiddenBiasY, "1", "neuron-text"));
+
+  layout.hidden.forEach((hNode) => {
+    const line = createLine(hiddenBiasX + 14, hiddenBiasY, hNode.x - 22, hNode.y, "conn-bias");
+    svg.appendChild(line);
+  });
+
   // Connections hidden -> output
   layout.hidden.forEach((hNode) => {
     const yNode = layout.output[0];
@@ -279,6 +348,17 @@ function drawNetwork() {
     line.dataset.to = yNode.id;
     svg.appendChild(line);
   });
+
+  // Bias node for output neuron (constant 1 going into output)
+  const outputBiasX = 410;
+  const outputBiasY = 40;
+  const outputBiasCircle = createCircle(outputBiasX, outputBiasY, 10, "neuron neuron-bias");
+  svg.appendChild(outputBiasCircle);
+  svg.appendChild(createText(outputBiasX, outputBiasY, "1", "neuron-text"));
+
+  const yNode = layout.output[0];
+  const outputBiasLine = createLine(outputBiasX + 14, outputBiasY, yNode.x - 22, yNode.y, "conn-bias");
+  svg.appendChild(outputBiasLine);
 
   // Neurons
   layout.input.forEach((node) => {
@@ -359,56 +439,6 @@ function highlightForStep(step) {
   }
 }
 
-function getWeightForConnection(from, to) {
-  const H = architecture.hiddenSize;
-
-  if ((from === "x1" || from === "x2") && to && to.startsWith("h")) {
-    const j = parseInt(to.slice(1), 10) - 1;
-    if (j < 0 || j >= H) return null;
-    const i = from === "x1" ? 0 : 1;
-    return params.w_ih[j][i];
-  }
-
-  if (from && from.startsWith("h") && to === "y") {
-    const j = parseInt(from.slice(1), 10) - 1;
-    if (j < 0 || j >= H) return null;
-    return params.w_ho[j];
-  }
-
-  return null;
-}
-
-function updateConnectionStyles(updatedSet) {
-  const H = architecture.hiddenSize;
-  let maxAbs = 0;
-
-  for (let j = 0; j < H; j++) {
-    for (let i = 0; i < architecture.inputSize; i++) {
-      maxAbs = Math.max(maxAbs, Math.abs(params.w_ih[j][i]));
-    }
-    maxAbs = Math.max(maxAbs, Math.abs(params.w_ho[j]));
-  }
-
-  const lines = Array.from(svg.querySelectorAll(".conn"));
-  lines.forEach((line) => {
-    const from = line.dataset.from;
-    const to = line.dataset.to;
-    const w = getWeightForConnection(from, to);
-    if (w == null) return;
-
-    const abs = Math.abs(w);
-    const norm = maxAbs > 0 ? abs / maxAbs : 0;
-    let width = 1.5 + 3 * norm;
-
-    if (updatedSet && updatedSet.has(`${from}->${to}`)) {
-      width += 1.2;
-    }
-
-    line.style.strokeWidth = String(width);
-    line.style.stroke = w >= 0 ? "#60a5fa" : "#fb7185";
-  });
-}
-
 // UI rendering for equations & values
 function renderStep() {
   computeForward();
@@ -420,8 +450,7 @@ function renderStep() {
   });
 
   const s = cache;
-  const H = architecture.hiddenSize;
-  let updatedConnections = null;
+  const hiddenNeuronCount = architecture.hiddenNeuronCount;
 
   if (currentStep === 0) {
     stepTitleEl.textContent = "1. Forward pass: from inputs to prediction";
@@ -438,19 +467,24 @@ function renderStep() {
     stepExplainerEl.textContent =
       "We start by mixing the two inputs inside each hidden neuron, " +
       "squashing them with a sigmoid, then mixing those hidden activations " +
-      "again to get the final prediction ŷ. On the picture, thicker, brighter " +
-      "lines mean larger weights.";
+      "again to get the final prediction ŷ.";
 
     const pairs = [
-      ["x₁", s.x[0]],
-      ["x₂", s.x[1]],
+      ["Input x₁", s.inputVector[0]],
+      ["Input x₂", s.inputVector[1]],
     ];
-    for (let j = 0; j < H; j++) {
-      pairs.push([`z_h${j + 1}`, s.z_h[j]]);
-      pairs.push([`h${j + 1}`, s.h[j]]);
+    for (let hiddenIndex = 0; hiddenIndex < hiddenNeuronCount; hiddenIndex++) {
+      pairs.push([
+        `Hidden ${hiddenIndex + 1} sum (z_h${hiddenIndex + 1})`,
+        s.hiddenWeightedSums[hiddenIndex],
+      ]);
+      pairs.push([
+        `Hidden ${hiddenIndex + 1} act (h${hiddenIndex + 1})`,
+        s.hiddenActivations[hiddenIndex],
+      ]);
     }
-    pairs.push(["z_out", s.z_o]);
-    pairs.push(["ŷ (prediction)", s.yPred]);
+    pairs.push(["Output sum (z_out)", s.outputWeightedSum]);
+    pairs.push(["Prediction ŷ", s.predictedOutput]);
     renderValues(pairs);
   } else if (currentStep === 1) {
     stepTitleEl.textContent = "2. Loss: how far is ŷ from y?";
@@ -466,9 +500,9 @@ function renderStep() {
       "The further apart they are, the bigger the loss.";
 
     renderValues([
-      ["ŷ (prediction)", s.yPred],
-      ["y (target)", s.yTrue],
-      ["L (loss)", s.loss],
+      ["Prediction ŷ", s.predictedOutput],
+      ["Target y", s.targetOutput],
+      ["Loss L", s.loss],
     ]);
   } else if (currentStep === 2) {
     stepTitleEl.textContent = "3. Backward: gradients at the output neuron";
@@ -488,14 +522,17 @@ function renderStep() {
       "how does the loss change? These are the gradients for the last layer.";
 
     const pairs = [
-      ["dL/dŷ", s.dL_dy],
-      ["σ'(z_out)", s.dy_dz_o],
-      ["dL/dz_out", s.dL_dz_o],
+      ["Gradient dL/dŷ (loss vs prediction)", s.gradLossWrtPrediction],
+      ["σ'(z_out) (slope of sigmoid)", s.gradPredictionWrtOutputSum],
+      ["Gradient dL/dz_out", s.gradLossWrtOutputSum],
     ];
-    for (let j = 0; j < H; j++) {
-      pairs.push([`dL/dw_ho${j + 1}`, s.dL_dw_ho[j]]);
+    for (let hiddenIndex = 0; hiddenIndex < hiddenNeuronCount; hiddenIndex++) {
+      pairs.push([
+        `Grad dL/dw_ho${hiddenIndex + 1} (hidden ${hiddenIndex + 1} → output)`,
+        s.gradLossWrtHiddenToOutputWeights[hiddenIndex],
+      ]);
     }
-    pairs.push(["dL/db_o", s.dL_db_o]);
+    pairs.push(["Grad dL/db_o (output bias)", s.gradLossWrtOutputBias]);
     renderValues(pairs);
   } else if (currentStep === 3) {
     stepTitleEl.textContent = "4. Backward: gradients for hidden neurons and input weights";
@@ -516,28 +553,25 @@ function renderStep() {
       "detectors' in the hidden layer.";
 
     const pairs = [];
-    for (let j = 0; j < H; j++) {
-      pairs.push([`dL/dh${j + 1}`, s.dL_dh[j]]);
-      pairs.push([`σ'(z_h${j + 1})`, s.dh_dz_h[j]]);
-      pairs.push([`dL/dz_h${j + 1}`, s.dL_dz_h[j]]);
+    for (let hiddenIndex = 0; hiddenIndex < hiddenNeuronCount; hiddenIndex++) {
+      pairs.push([
+        `Grad dL/dh${hiddenIndex + 1} (hidden act)`,
+        s.gradLossWrtHiddenActivations[hiddenIndex],
+      ]);
+      pairs.push([
+        `σ'(z_h${hiddenIndex + 1}) (hidden slope)`,
+        s.gradHiddenActivationWrtHiddenSum[hiddenIndex],
+      ]);
+      pairs.push([
+        `Grad dL/dz_h${hiddenIndex + 1} (hidden sum)`,
+        s.gradLossWrtHiddenWeightedSums[hiddenIndex],
+      ]);
     }
     renderValues(pairs);
   } else if (currentStep === 4) {
+    // Snapshot old weights and loss, then take one update step
     const oldLoss = s.loss;
-
-    const oldParams = {
-      w_ih: params.w_ih.map((row) => row.slice()),
-      b_h: params.b_h.slice(),
-      w_ho: params.w_ho.slice(),
-      b_o: params.b_o,
-    };
-
-    const gradSnapshot = {
-      dL_dw_ih: s.dL_dw_ih,
-      dL_db_h: s.dL_db_h,
-      dL_dw_ho: s.dL_dw_ho,
-      dL_db_o: s.dL_db_o,
-    };
+    const oldParams = JSON.parse(JSON.stringify(params));
 
     applyGradientDescent();
     computeForward();
@@ -554,77 +588,46 @@ function renderStep() {
 
     stepExplainerEl.textContent =
       "Finally, we move every weight and bias a small step in the direction " +
-      "that reduces the loss. The cards below show old → new values for each " +
-      "weight/bias, and the lines that change the most get a little thicker. " +
-      "Repeating this step many times is what training is.";
+      "that reduces the loss. Repeating this step many times is what training is.";
+
+    stepExplainerEl.textContent =
+      "Below you can see every weight and bias before and after " +
+      "this step (shown as old → new). Each step nudges them a bit.";
 
     const v = [];
     v.push(["Old loss", oldLoss]);
     v.push(["New loss", newLoss]);
 
-    const changed = [];
-
-    for (let j = 0; j < H; j++) {
-      for (let i = 0; i < architecture.inputSize; i++) {
-        const fromLabel = i === 0 ? "x₁" : "x₂";
-        const wLabel = `w(${fromLabel}→h${j + 1})`;
-        const oldW = oldParams.w_ih[j][i];
-        const newW = params.w_ih[j][i];
-        const g = gradSnapshot.dL_dw_ih[j][i];
+    // Show how each weight and bias changed: old → new
+    for (let hiddenIndex = 0; hiddenIndex < hiddenNeuronCount; hiddenIndex++) {
+      for (let inputIndex = 0; inputIndex < architecture.inputCount; inputIndex++) {
         v.push([
-          wLabel,
-          `${fmt(oldW)} → ${fmt(newW)}  (grad ${fmt(g, 3)})`,
+          `w_ih${hiddenIndex + 1},${inputIndex + 1}`,
+          `${fmt(oldParams.inputToHiddenWeights[hiddenIndex][inputIndex])} → ` +
+            `${fmt(params.inputToHiddenWeights[hiddenIndex][inputIndex])}`,
         ]);
-
-        const fromId = i === 0 ? "x1" : "x2";
-        const toId = `h${j + 1}`;
-        const deltaAbs = Math.abs(newW - oldW);
-        changed.push({ from: fromId, to: toId, deltaAbs });
       }
-
-      const oldBh = oldParams.b_h[j];
-      const newBh = params.b_h[j];
-      const gb = gradSnapshot.dL_db_h[j];
       v.push([
-        `b(h${j + 1})`,
-        `${fmt(oldBh)} → ${fmt(newBh)}  (grad ${fmt(gb, 3)})`,
+        `b_h${hiddenIndex + 1}`,
+        `${fmt(oldParams.hiddenBiases[hiddenIndex])} → ` +
+          `${fmt(params.hiddenBiases[hiddenIndex])}`,
       ]);
     }
 
-    for (let j = 0; j < H; j++) {
-      const oldWh = oldParams.w_ho[j];
-      const newWh = params.w_ho[j];
-      const g = gradSnapshot.dL_dw_ho[j];
+    for (let hiddenIndex = 0; hiddenIndex < hiddenNeuronCount; hiddenIndex++) {
       v.push([
-        `w(h${j + 1}→ŷ)`,
-        `${fmt(oldWh)} → ${fmt(newWh)}  (grad ${fmt(g, 3)})`,
+        `w_ho${hiddenIndex + 1}`,
+        `${fmt(oldParams.hiddenToOutputWeights[hiddenIndex])} → ` +
+          `${fmt(params.hiddenToOutputWeights[hiddenIndex])}`,
       ]);
-
-      const fromId = `h${j + 1}`;
-      const toId = "y";
-      const deltaAbs = Math.abs(newWh - oldWh);
-      changed.push({ from: fromId, to: toId, deltaAbs });
     }
-
-    const oldBo = oldParams.b_o;
-    const newBo = params.b_o;
-    const gbO = gradSnapshot.dL_db_o;
     v.push([
-      "b(ŷ)",
-      `${fmt(oldBo)} → ${fmt(newBo)}  (grad ${fmt(gbO, 3)})`,
+      "b_o",
+      `${fmt(oldParams.outputBias)} → ${fmt(params.outputBias)}`,
     ]);
-
-    changed.sort((a, b) => b.deltaAbs - a.deltaAbs);
-    const topChanged = changed.slice(0, 4);
-    updatedConnections = new Set(
-      topChanged.map((c) => `${c.from}->${c.to}`)
-    );
 
     renderValues(v, ["Old loss", "New loss"]);
   }
-
-  updateConnectionStyles(updatedConnections);
-}
 }
 
 function renderValues(pairs, highlightLabels = []) {
@@ -640,7 +643,11 @@ function renderValues(pairs, highlightLabels = []) {
 
     const valEl = document.createElement("div");
     valEl.className = "val";
-    valEl.textContent = fmt(value);
+    if (typeof value === "number") {
+      valEl.textContent = fmt(value);
+    } else {
+      valEl.textContent = String(value);
+    }
 
     card.appendChild(labelEl);
     card.appendChild(valEl);
@@ -665,7 +672,7 @@ lrSlider.addEventListener("input", () => {
 
 hiddenCountSlider.addEventListener("input", () => {
   const H = parseInt(hiddenCountSlider.value, 10);
-  architecture.hiddenSize = H;
+  architecture.hiddenNeuronCount = H;
   hiddenCountVal.textContent = String(H);
   updateLayout();
   drawNetwork();
@@ -695,14 +702,15 @@ function initUI() {
   inputX2Val.textContent = parseFloat(inputX2.value).toFixed(2);
   targetYVal.textContent = parseFloat(targetY.value).toFixed(2);
   lrVal.textContent = parseFloat(lrSlider.value).toFixed(2);
-  hiddenCountVal.textContent = String(architecture.hiddenSize);
+  hiddenCountVal.textContent = String(architecture.hiddenNeuronCount);
 }
 
 function init() {
   initParams();
   initUI();
-   updateLayout();
+  updateLayout();
   drawNetwork();
+  renderVariableLegend();
   computeForward();
   computeBackward();
   renderStep();

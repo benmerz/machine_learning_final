@@ -226,6 +226,10 @@ input[type="range"] {
   background: #f97316;
 }
 
+.dot-bias {
+  background: #38bdf8;
+}
+
 .line {
   width: 22px;
   height: 0;
@@ -256,6 +260,25 @@ input[type="range"] {
   font-size: 0.85rem;
   margin-bottom: 6px;
   color: var(--muted);
+}
+
+.variable-legend {
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border-subtle);
+  font-size: 0.78rem;
+  color: var(--muted);
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+  gap: 4px 10px;
+}
+
+.variable-legend-item {
+  line-height: 1.2;
+}
+
+.variable-legend-item strong {
+  color: #e5e7eb;
 }
 
 .equations {
