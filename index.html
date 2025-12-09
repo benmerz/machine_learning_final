@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Neural Network Backpropagation Visualizer</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+    <header class="app-header">
+      <h1>Neural Network Backpropagation Visualizer</h1>
+      <p class="subtitle">Step through every detail of forward and backward passes for a tiny neural network.</p>
+    </header>
+
+    <main class="layout">
+      <section class="controls-panel">
+        <h2>Inputs & Learning</h2>
+        <p class="panel-hint">This demo always has 2 inputs and 1 output. You can choose how many hidden neurons sit in the middle.</p>
+
+        <div class="control-group">
+          <label>Input x₁:</label>
+          <input id="input-x1" type="range" min="-1" max="1" step="0.1" value="0.2" />
+          <span id="input-x1-value" class="value-label">0.2</span>
+        </div>
+        <div class="control-group">
+          <label>Input x₂:</label>
+          <input id="input-x2" type="range" min="-1" max="1" step="0.1" value="-0.5" />
+          <span id="input-x2-value" class="value-label">-0.5</span>
+        </div>
+        <div class="control-group">
+          <label>Target y (desired output):</label>
+          <input id="target-y" type="range" min="0" max="1" step="0.05" value="0.7" />
+          <span id="target-y-value" class="value-label">0.7</span>
+        </div>
+
+        <div class="control-group">
+          <label>Hidden neurons: <span id="hidden-count-value" class="value-label">2</span></label>
+          <input id="hidden-count" type="range" min="1" max="4" step="1" value="2" />
+        </div>
+
+        <div class="control-group learning-rate-group">
+          <label>Learning rate α:</label>
+          <input id="learning-rate" type="range" min="0.01" max="1" step="0.01" value="0.1" />
+          <span id="learning-rate-value" class="value-label">0.10</span>
+        </div>
+
+        <div class="buttons-row">
+          <button id="btn-reset" class="btn secondary">Reset Weights</button>
+        </div>
+
+        <h3>Step Through Backprop</h3>
+        <ol class="steps-list">
+          <li data-step="0" class="step-item active">1. Forward pass (compute outputs)</li>
+          <li data-step="1" class="step-item">2. Loss (compare prediction to target)</li>
+          <li data-step="2" class="step-item">3. Gradients at the output</li>
+          <li data-step="3" class="step-item">4. Gradients for the hidden layer</li>
+          <li data-step="4" class="step-item">5. Update weights with gradient descent</li>
+        </ol>
+        <div class="buttons-row">
+          <button id="btn-prev" class="btn secondary">Previous</button>
+          <button id="btn-next" class="btn primary">Next step</button>
+        </div>
+      </section>
+
+      <section class="visual-panel">
+        <div class="network-and-legend">
+          <div class="network-container">
+            <svg id="network-svg" viewBox="0 0 600 320"></svg>
+          </div>
+          <div class="legend">
+            <h3>Legend</h3>
+            <div class="legend-item"><span class="dot dot-input"></span> Input neuron</div>
+            <div class="legend-item"><span class="dot dot-hidden"></span> Hidden neuron</div>
+            <div class="legend-item"><span class="dot dot-output"></span> Output neuron</div>
+            <div class="legend-item"><span class="line line-weight"></span> Weight</div>
+            <div class="legend-item"><span class="line line-gradient"></span> Gradient flow</div>
+          </div>
+        </div>
+
+        <section class="details-panel">
+          <h2>Math &amp; Explanations</h2>
+          <div id="step-title" class="step-title">1. Forward pass: compute activations</div>
+          <div id="equations" class="equations"></div>
+          <div id="step-explainer" class="step-explainer"></div>
+          <div id="values-table" class="values-table"></div>
+        </section>
+      </section>
+    </main>
+
+    <footer class="app-footer">
+      <span>Fully client-side, built with plain HTML/CSS/JS.</span>
+    </footer>
+  </div>
+
+  <script src="app.js"></script>
+</body>
+</html>
